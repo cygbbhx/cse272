@@ -66,6 +66,37 @@ inline Real GGX(Real n_dot_h, Real roughness) {
     return GTR2(n_dot_h, roughness);
 }
 
+inline std::pair<Real, Real> compute_alpha(Real roughness, Real anisotropic) {
+    Real aspect = sqrt(1 - anisotropic * 0.9);
+    Real alpha_min = 0.0001;
+    Real alpha_x = fmax(alpha_min, (roughness * roughness) / aspect);
+    Real alpha_y = fmax(alpha_min, (roughness * roughness) * aspect);
+    
+    return {alpha_x, alpha_y};
+}
+
+inline Real D_metal(Vector3 h_l, Real roughness, Real anisotropic) {
+    auto [alpha_x, alpha_y] = compute_alpha(roughness, anisotropic);
+
+    Real h_l_factor = ((h_l.x * h_l.x))/(alpha_x * alpha_x) + (h_l.y * h_l.y)/(alpha_y * alpha_y) + (h_l.z * h_l.z);
+    Real D_m = 1 / (c_PI * alpha_x * alpha_y * (h_l_factor * h_l_factor));
+    
+    return D_m;
+}
+
+inline Real G_clearcoat(Vector3 w_l) {
+    Real r = 0.25;
+    Real Lamda = (sqrt(1 + ((w_l.x * r * w_l.x * r) + (w_l.y * r * w_l.y * r))/((w_l.z * w_l.z))) - 1) / 2;
+    return 1 / (1 + Lamda);
+}
+
+inline Real G_metal(Vector3 w_l, Real roughness, Real anisotropic) {
+    auto [alpha_x, alpha_y] = compute_alpha(roughness, anisotropic);
+
+    Real lambda = (sqrt(1 + ((w_l.x*alpha_x * w_l.x*alpha_x) + (w_l.y*alpha_y*w_l.y*alpha_y)) / (w_l.z * w_l.z)) - 1) / 2;
+    return 1 / (1 + lambda);
+}
+
 /// The masking term models the occlusion between the small mirrors of the microfacet models.
 /// See Eric Heitz's paper "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs"
 /// for a great explanation.
@@ -111,4 +142,35 @@ inline Vector3 sample_visible_normals(const Vector3 &local_dir_in, Real alpha, c
 
     // Transforming the normal back to the ellipsoid configuration
     return normalize(Vector3{alpha * hemi_N.x, alpha * hemi_N.y, max(Real(0), hemi_N.z)});
+}
+
+inline Vector3 sample_visible_normals(const Vector3 &local_dir_in, Real alpha_x, Real alpha_y, const Vector2 &rnd_param) {
+    // The incoming direction is in the "ellipsodial configuration" in Heitz's paper
+    if (local_dir_in.z < 0) {
+        // Ensure the input is on top of the surface.
+        return -sample_visible_normals(-local_dir_in, alpha_x, alpha_y, rnd_param);
+    }
+
+    // Transform the incoming direction to the "hemisphere configuration".
+    Vector3 hemi_dir_in = normalize(
+        Vector3{alpha_x * local_dir_in.x, alpha_y * local_dir_in.y, local_dir_in.z});
+
+    // Parameterization of the projected area of a hemisphere.
+    // First, sample a disk.
+    Real r = sqrt(rnd_param.x);
+    Real phi = 2 * c_PI * rnd_param.y;
+    Real t1 = r * cos(phi);
+    Real t2 = r * sin(phi);
+    // Vertically scale the position of a sample to account for the projection.
+    Real s = (1 + hemi_dir_in.z) / 2;
+    t2 = (1 - s) * sqrt(1 - t1 * t1) + s * t2;
+    // Point in the disk space
+    Vector3 disk_N{t1, t2, sqrt(max(Real(0), 1 - t1*t1 - t2*t2))};
+
+    // Reprojection onto hemisphere -- we get our sampled normal in hemisphere space.
+    Frame hemi_frame(hemi_dir_in);
+    Vector3 hemi_N = to_world(hemi_frame, disk_N);
+
+    // Transforming the normal back to the ellipsoid configuration
+    return normalize(Vector3{alpha_x * hemi_N.x, alpha_y * hemi_N.y, max(Real(0), hemi_N.z)});
 }
