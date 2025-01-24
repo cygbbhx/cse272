@@ -97,29 +97,7 @@ Real pdf_sample_bsdf_op::operator()(const DisneyBSDF &bsdf) const {
     glassWeight /= totalWeight;
 
     Real diffuse_prob = pdf_sample_bsdf(DisneyDiffuse{bsdf.base_color, bsdf.roughness, bsdf.subsurface}, dir_in, dir_out, vertex, texture_pool, dir);
-
-    Vector3 half_vector = normalize(dir_in + dir_out);
-    Real n_dot_in = dot(frame.n, dir_in);
-    Real n_dot_out = dot(frame.n, dir_out);
-    Real n_dot_h = dot(frame.n, half_vector);
-    if (n_dot_out <= 0 || n_dot_h <= 0) {
-        return 0;
-    }
-
-    Vector3 h_l = to_local(frame, half_vector);
-    Vector3 w_l_in = to_local(frame, dir_in);
-    
-    Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-    roughness = std::clamp(roughness, Real(0.01), Real(1));
-
-    Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
-
-    Real D_m = D_metal(h_l, roughness, anisotropic);
-    Real G_in = G_metal(w_l_in, roughness, anisotropic);
-
-    Real metal_prob = D_m * G_in / (4.0 * fabs(n_dot_in));
-
-    // Real metal_prob = pdf_sample_bsdf(DisneyMetal{bsdf.base_color, bsdf.roughness, bsdf.anisotropic}, dir_in, dir_out, vertex, texture_pool, dir);
+    Real metal_prob = pdf_sample_bsdf(DisneyMetal{bsdf.base_color, bsdf.roughness, bsdf.anisotropic}, dir_in, dir_out, vertex, texture_pool, dir);
     Real glass_prob = pdf_sample_bsdf(DisneyGlass{bsdf.base_color, bsdf.roughness, bsdf.anisotropic, bsdf.eta}, dir_in, dir_out, vertex, texture_pool, dir);
     Real clearcoat_prob = pdf_sample_bsdf(DisneyClearcoat{bsdf.clearcoat_gloss}, dir_in, dir_out, vertex, texture_pool, dir);
 
@@ -156,26 +134,24 @@ std::optional<BSDFSampleRecord>
     glassWeight /= totalWeight;
 
     if (dot(dir_in, vertex.geometric_normal) <= 0) {
-        return sample_bsdf(DisneyGlass{bsdf.base_color, bsdf.roughness, bsdf.anisotropic}, dir_in, vertex, texture_pool, rnd_param_uv, rnd_param_w, dir);
+        return sample_bsdf(DisneyGlass{bsdf.base_color, bsdf.roughness, bsdf.anisotropic, bsdf.eta}, dir_in, vertex, texture_pool, rnd_param_uv, rnd_param_w, dir);
     }
 
     Real metal_prob = diffuseWeight + metalWeight;
     Real clearcoat_prob = metal_prob + clearcoatWeight;
-    Real glass_prob = clearcoat_prob + glassWeight;
     Real scaled_w = 0;
 
     if (rnd_param_w <= diffuseWeight) {
         scaled_w = rnd_param_w / diffuseWeight;
         return sample_bsdf(DisneyDiffuse{bsdf.base_color, bsdf.roughness, bsdf.subsurface}, dir_in,vertex, texture_pool, rnd_param_uv, scaled_w, dir);
     } else if (rnd_param_w <= metal_prob) {
-        scaled_w = (rnd_param_w - diffuseWeight) / (metal_prob - diffuseWeight);
+        scaled_w = (rnd_param_w - diffuseWeight) / metalWeight;
         return sample_bsdf(DisneyMetal{bsdf.base_color, bsdf.roughness, bsdf.anisotropic}, dir_in, vertex, texture_pool, rnd_param_uv, scaled_w, dir);
     } else if (rnd_param_w <= clearcoat_prob) {
-        scaled_w = (rnd_param_w - metal_prob) / (clearcoat_prob - metal_prob);
+        scaled_w = (rnd_param_w - metal_prob) / clearcoatWeight;
         return sample_bsdf(DisneyClearcoat{bsdf.clearcoat_gloss}, dir_in, vertex, texture_pool, rnd_param_uv, scaled_w, dir);
     } else {
-        Real prob = 1 - glassWeight;
-        scaled_w = (rnd_param_w - prob) / (1 - prob);
+        scaled_w = (rnd_param_w - clearcoat_prob) / glassWeight;
         return sample_bsdf(DisneyGlass{bsdf.base_color, bsdf.roughness, bsdf.anisotropic, bsdf.eta}, dir_in, vertex, texture_pool, rnd_param_uv, scaled_w, dir);
     }
 }
