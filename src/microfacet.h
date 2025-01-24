@@ -26,6 +26,10 @@ inline T schlick_fresnel(const T &F0, Real cos_theta) {
         pow(max(1 - cos_theta, Real(0)), Real(5));
 }
 
+inline Real schlick_fresnel(Real F0, Vector3 n, Vector3 w) {
+    return (1 + (F0 - 1)) * pow(1 - fabs(dot(n, w)), Real(5));
+}
+
 /// Fresnel equation of a dielectric interface.
 /// https://seblagarde.wordpress.com/2013/04/29/memo-on-fresnel-equations/
 /// n_dot_i: abs(cos(incident angle))
