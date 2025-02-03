@@ -28,12 +28,20 @@ Spectrum vol_path_tracing_1(const Scene &scene,
     }
 
     PathVertex vertex = *vertex_;
-    Spectrum sigma_a = get_sigma_a(scene.media[vertex.exterior_medium_id], vertex_->position);
+    // TODO: fix to  camera exterior ID 
+    int camera_id = scene.camera.medium_id;
+    Medium cur_medium = scene.media[camera_id];
+    Spectrum sigma_a = get_sigma_a(cur_medium, vertex_->position);
     Spectrum current_path_throughput = fromRGB(Vector3{1, 1, 1});
 
     // We hit a light immediately. 
     if (is_light(scene.shapes[vertex.shape_id])) {
-        Spectrum transmittance = exp(-sigma_a * distance(vertex.position, ray.org));
+        Real t = distance(vertex.position, ray.org);
+        Spectrum transmittance = exp(-sigma_a * t);
+        // consider vacuum case (where medium id is -1)
+        if (camera_id == -1) {
+            return make_zero_spectrum();
+        }
         return current_path_throughput *
             emission(vertex, -ray.dir, scene) * transmittance;
     }
