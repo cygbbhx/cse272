@@ -305,7 +305,127 @@ Spectrum vol_path_tracing_4(const Scene &scene,
                             int x, int y, /* pixel coordinates */
                             pcg32_state &rng) {
     // Homework 2: implememt this!
-    return make_zero_spectrum();
+    int w = scene.camera.width, h = scene.camera.height;
+    Vector2 screen_pos((x + next_pcg32_real<Real>(rng)) / w,
+                       (y + next_pcg32_real<Real>(rng)) / h);
+    Ray ray = sample_primary(scene.camera, screen_pos);
+    RayDifferential ray_diff = init_ray_differential(w, h);
+
+
+    Spectrum current_path_throughput = make_const_spectrum(1);
+    Spectrum radiance = make_zero_spectrum();
+    int bounces = 0;
+    
+    int camera_id = scene.camera.medium_id;
+    Medium cur_medium = scene.media[camera_id];
+    int cur_medium_id = camera_id;
+
+    int max_depth = scene.options.max_depth;
+
+    while (true) {
+        std::optional<PathVertex> vertex_ = intersect(scene, ray, ray_diff);
+        PathVertex vertex;
+        bool scatter = false;
+
+        Real transmittance = 1;
+        Real trans_pdf = 1;
+
+        Real t_max;
+        if (!vertex_) {
+            t_max = infinity<Real>();
+        }
+        else {
+            vertex = *vertex_;
+            t_max = distance(vertex.position, ray.org);
+        }
+
+        if (cur_medium_id >= 0) {
+            // sample t s.t. p(t) ~ exp(-sigma_t * t)
+            cur_medium = scene.media[cur_medium_id];
+
+            Real sigma_a = avg(get_sigma_a(cur_medium, ray.org));
+            Real sigma_s = avg(get_sigma_s(cur_medium, ray.org));
+            Real sigma_t = sigma_a + sigma_s;
+
+            Real u = next_pcg32_real<Real>(rng);
+            Real t = -log(1 - u) / sigma_t; 
+
+            // compute transmittance and trans_pdf
+            // if t < t_hit, set scatter = True
+            if (t < t_max) {
+                transmittance = exp(-sigma_t * t);
+                trans_pdf = exp(-sigma_t * t) * sigma_t;
+                scatter = true;
+                ray.org = ray.org + t * ray.dir;
+            } else {
+                trans_pdf = exp(-sigma_t * t_max);
+                transmittance = exp(-sigma_t * t_max);
+                ray.org = ray.org + t_max * ray.dir;
+            }
+        } 
+
+        current_path_throughput *= (transmittance / trans_pdf);
+        if (not scatter) {
+            // reach a surface, include emission
+            Spectrum Le = make_zero_spectrum();
+            if (vertex_){
+                if (is_light(scene.shapes[vertex.shape_id])) {
+                    Le = emission(vertex, -ray.dir, scene);
+                }
+
+            }
+            radiance += current_path_throughput * Le;
+        }
+        if (bounces == max_depth - 1 and max_depth != -1) {
+            // reach maximum bounces
+            break;
+        }
+        if (not scatter and vertex_) {
+            if (vertex.material_id == -1){
+                // index-matching interface, skip through it
+                ray = Ray{ray.org, ray.dir, get_intersection_epsilon(scene), infinity<Real>()};
+                cur_medium_id = update_medium_id(ray, vertex, cur_medium_id);
+                bounces += 1;
+                continue;
+            }
+        }
+        // sample next direct & update path throughput
+        if (scatter) {
+            PhaseFunction rho = get_phase_function(cur_medium);
+            Spectrum sigma_s = get_sigma_s(cur_medium, ray.org);
+            Vector2 phase_uv{next_pcg32_real<Real>(rng), next_pcg32_real<Real>(rng)};
+
+            std::optional <Vector3> next_dir_ = sample_phase_function(rho, -ray.dir, phase_uv);
+
+            if (!next_dir_){
+                break;
+            }
+            const Vector3 next_dir = *next_dir_;
+            Spectrum phase_val = eval(rho, -ray.dir, next_dir);
+            Real phase_pdf = pdf_sample_phase(rho, -ray.dir, next_dir);
+            current_path_throughput *= (phase_val / phase_pdf) * sigma_s;
+            // update ray.dir
+            // ...
+            Ray next_ray{ray.org, next_dir, get_intersection_epsilon(scene), infinity<Real>()};
+            ray = next_ray;
+        } else {
+            // Hit a surface
+            break;
+        }
+        // Russian roulette
+        Real rr_prob = 1;
+        if (bounces >= scene.options.rr_depth){
+            rr_prob = min(max(current_path_throughput), Real(0.95));
+            if (next_pcg32_real<Real>(rng) > rr_prob) {
+                break;
+            }
+            else {
+                current_path_throughput /= rr_prob;
+            }
+        }
+        bounces += 1;
+    }
+    return radiance;
 }
 
 // The fifth volumetric renderer: 
