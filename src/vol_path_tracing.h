@@ -28,7 +28,6 @@ Spectrum vol_path_tracing_1(const Scene &scene,
     }
 
     PathVertex vertex = *vertex_;
-    // TODO: fix to  camera exterior ID 
     int camera_id = scene.camera.medium_id;
     Medium cur_medium = scene.media[camera_id];
     Spectrum sigma_a = get_sigma_a(cur_medium, ray.org);

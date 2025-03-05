@@ -30,6 +30,18 @@ Spectrum eval_op::operator()(const DisneyGlass &bsdf) const {
     roughness = std::clamp(roughness, Real(0.01), Real(1));
 
     Real h_dot_in = dot(half_vector, dir_in);
+
+    // Q4.4
+    // Real F0 = pow((1 - eta) / (1 + eta), 2);
+    // Real n_dot_in = dot(frame.n, dir_in);
+    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
+
+    // Real F = Real(1);
+
+    // if (cos_theta_t_2 > 0) {
+    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
+    // }
+
     Real F = fresnel_dielectric(h_dot_in, eta);
 
     Spectrum baseColor = eval(bsdf.base_color, vertex.uv, vertex.uv_screen_size, texture_pool);
@@ -89,6 +101,18 @@ Real pdf_sample_bsdf_op::operator()(const DisneyGlass &bsdf) const {
 
     // TODO: MODIFY F/D/G VALUE FOR GLASS
     Real h_dot_in = dot(half_vector, dir_in);
+
+    // Q4.4
+    // Real F0 = pow((1 - eta) / (1 + eta), 2);
+    // Real n_dot_in = dot(frame.n, dir_in);
+    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
+
+    // Real F = Real(1);
+
+    // if (cos_theta_t_2 > 0) {
+    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
+    // }
+
     Real F = fresnel_dielectric(h_dot_in, eta);
 
     Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
@@ -142,6 +166,18 @@ std::optional<BSDFSampleRecord>
     // Now we need to decide whether to reflect or refract.
     // We do this using the Fresnel term.
     Real h_dot_in = dot(half_vector, dir_in);
+
+    // Q4.4
+    // Real F0 = pow((1 - eta) / (1 + eta), 2);
+    // Real n_dot_in = dot(frame.n, dir_in);
+    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
+
+    // Real F = Real(1);
+
+    // if (cos_theta_t_2 > 0) {
+    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
+    // }
+
     Real F = fresnel_dielectric(h_dot_in, eta);
 
 

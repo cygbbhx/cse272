@@ -1,3 +1,7 @@
+## Files for Bonus points
+- `volpath_test/my_scene.xml`: scene file
+- `images/my_scene.exr`: rendered image
+
 # lajolla
 UCSD CSE 272 renderer
 

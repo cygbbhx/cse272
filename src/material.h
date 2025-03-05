@@ -79,6 +79,14 @@ struct DisneySheen {
     Texture<Real> sheen_tint;
 };
 
+struct Iridescent {
+    Texture<Spectrum> base_color;
+    Texture<Real> roughness;
+    Texture<Real> anisotropic;
+
+    Real eta;
+};
+
 /// For homework 1: the whole Disney BRDF.
 struct DisneyBSDF {
     Texture<Spectrum> base_color;

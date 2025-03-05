@@ -104,9 +104,19 @@ Image3 vol_path_render(const Scene &scene) {
     int w = scene.camera.width, h = scene.camera.height;
     Image3 img(w, h);
 
+    // int patch_x0 = 200;
+    // int patch_x1 = 400;
+    // int patch_y0 = 200;
+    // int patch_y1 = 400;
+
+    // Image3 img(patch_x1-patch_x0, patch_y1-patch_y0);
+
     constexpr int tile_size = 16;
     int num_tiles_x = (w + tile_size - 1) / tile_size;
     int num_tiles_y = (h + tile_size - 1) / tile_size;
+
+    // int num_tiles_x = (patch_x1 - patch_x0 + tile_size - 1) / tile_size;
+    // int num_tiles_y = (patch_y1 - patch_y0 + tile_size - 1) / tile_size;
 
     auto f = vol_path_tracing;
     if (scene.options.vol_path_version == 1) {
@@ -131,6 +141,12 @@ Image3 vol_path_render(const Scene &scene) {
         int x1 = min(x0 + tile_size, w);
         int y0 = tile[1] * tile_size;
         int y1 = min(y0 + tile_size, h);
+
+        // int x0 = patch_x0 + tile[0] * tile_size;
+        // int x1 = min(x0 + tile_size, patch_x1);
+        // int y0 = patch_y0 + tile[1] * tile_size;
+        // int y1 = min(y0 + tile_size, patch_y1);
+        
         for (int y = y0; y < y1; y++) {
             for (int x = x0; x < x1; x++) {
                 Spectrum radiance = make_zero_spectrum();
@@ -143,6 +159,7 @@ Image3 vol_path_render(const Scene &scene) {
                     }
                 }
                 img(x, y) = radiance / Real(spp);
+                // img(x-patch_x0, y-patch_y0) = radiance / Real(spp);
             }
         }
         reporter.update(1);
