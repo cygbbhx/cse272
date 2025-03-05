@@ -1,3 +1,9 @@
+//"A Practical Extension to Microfacet Theory for the Modeling of Varying Iridescence
+//Laurent Belcour, Pascal Barla
+//ACM Transactions on Graphics (proc. of SIGGRAPH 2017)
+//
+//May 2017"
+
 #include "../microfacet.h"
 
 Spectrum eval_op::operator()(const Iridescent &bsdf) const {
@@ -30,18 +36,6 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     roughness = std::clamp(roughness, Real(0.01), Real(1));
 
     Real h_dot_in = dot(half_vector, dir_in);
-
-    // Q4.4
-    // Real F0 = pow((1 - eta) / (1 + eta), 2);
-    // Real n_dot_in = dot(frame.n, dir_in);
-    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
-
-    // Real F = Real(1);
-
-    // if (cos_theta_t_2 > 0) {
-    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
-    // }
-
     Real F = fresnel_dielectric(h_dot_in, eta);
 
     Spectrum baseColor = eval(bsdf.base_color, vertex.uv, vertex.uv_screen_size, texture_pool);
@@ -95,24 +89,7 @@ Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
     // Clamp roughness to avoid numerical issues.
     roughness = std::clamp(roughness, Real(0.01), Real(1));
 
-    // We sample the visible normals, also we use F to determine
-    // whether to sample reflection or refraction
-    // so PDF ~ F * D * G_in for reflection, PDF ~ (1 - F) * D * G_in for refraction.
-
-    // TODO: MODIFY F/D/G VALUE FOR GLASS
     Real h_dot_in = dot(half_vector, dir_in);
-
-    // Q4.4
-    // Real F0 = pow((1 - eta) / (1 + eta), 2);
-    // Real n_dot_in = dot(frame.n, dir_in);
-    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
-
-    // Real F = Real(1);
-
-    // if (cos_theta_t_2 > 0) {
-    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
-    // }
-
     Real F = fresnel_dielectric(h_dot_in, eta);
 
     Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
@@ -141,17 +118,11 @@ std::optional<BSDFSampleRecord>
     if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
         frame = -frame;
     }
-    // Homework 1: implement this!
+    
     Real roughness = eval(
         bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-    // Clamp roughness to avoid numerical issues.
-    roughness = std::clamp(roughness, Real(0.01), Real(1));
 
-    // TODO: ANISOTROPIC VALUE
     Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
-
-    // Sample a micro normal and transform it to world space -- this is our half-vector.
-    // TODO: SAMPLE VISIBLE NORMALS -> TAKES 2 ALPHA VALUES (A_X, A_Y)
     auto [alpha_x, alpha_y] = compute_alpha(roughness, anisotropic);
     
     Vector3 local_dir_in = to_local(frame, dir_in);
@@ -166,20 +137,7 @@ std::optional<BSDFSampleRecord>
     // Now we need to decide whether to reflect or refract.
     // We do this using the Fresnel term.
     Real h_dot_in = dot(half_vector, dir_in);
-
-    // Q4.4
-    // Real F0 = pow((1 - eta) / (1 + eta), 2);
-    // Real n_dot_in = dot(frame.n, dir_in);
-    // Real cos_theta_t_2 = 1 - (1 - pow(n_dot_in, 2)) / pow(eta, 2);
-
-    // Real F = Real(1);
-
-    // if (cos_theta_t_2 > 0) {
-    //     F = F0 + (1 - F0) * pow(1 - sqrt(cos_theta_t_2), 5);
-    // }
-
     Real F = fresnel_dielectric(h_dot_in, eta);
-
 
     if (rnd_param_w <= F) {
         Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
