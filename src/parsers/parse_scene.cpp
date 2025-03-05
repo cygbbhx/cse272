@@ -1046,7 +1046,30 @@ std::tuple<std::string /* ID */, Material> parse_bsdf(
             }
         }
         return std::make_tuple(id, DisneyMetal{base_color, roughness, anisotropic});
-    } else if (type == "disneyglass") {
+    } 
+    else if (type == "iridescent") {
+        Texture<Spectrum> base_color = make_constant_spectrum_texture(fromRGB(Vector3{0.5, 0.5, 0.5}));
+        Texture<Real> roughness = make_constant_float_texture(Real(0.5));
+        Texture<Real> anisotropic = make_constant_float_texture(Real(0.0));
+        Real eta = Real(1.5);
+        for (auto child : node.children()) {
+            std::string name = child.attribute("name").value();
+            if (name == "baseColor" || name == "base_color") {
+                base_color = parse_spectrum_texture(
+                    child, texture_map, texture_pool, default_map);
+            } else if (name == "roughness") {
+                roughness = parse_float_texture(
+                    child, texture_map, texture_pool, default_map);
+            } else if (name == "anisotropic") {
+                anisotropic = parse_float_texture(
+                    child, texture_map, texture_pool, default_map);
+            } else if (name == "eta") {
+                eta = parse_float(child.attribute("value").value(), default_map);
+            }
+        }
+        return std::make_tuple(id, Iridescent{base_color, roughness, anisotropic, eta});    
+    }
+    else if (type == "disneyglass") {
         Texture<Spectrum> base_color = make_constant_spectrum_texture(fromRGB(Vector3{0.5, 0.5, 0.5}));
         Texture<Real> roughness = make_constant_float_texture(Real(0.5));
         Texture<Real> anisotropic = make_constant_float_texture(Real(0.0));

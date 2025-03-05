@@ -115,7 +115,8 @@ using Material = std::variant<Lambertian,
                               DisneyGlass,
                               DisneyClearcoat,
                               DisneySheen,
-                              DisneyBSDF>;
+                              DisneyBSDF,
+                              Iridescent>;
 
 /// We allow non-reciprocal BRDFs, so it's important
 /// to distinguish which direction we are tracing the rays.
