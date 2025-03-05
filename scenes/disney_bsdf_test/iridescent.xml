@@ -14,10 +14,13 @@
 		</transform>
 
 		<bsdf type="iridescent">
-			<rgb name="baseColor" value="0.82 0.67 0.16"/>
-			<float name="roughness" value="0.1"/>
+			<rgb name="baseColor" value="0.01 0.67 0.56"/>
+			<float name="roughness" value="0.5"/>
 			<float name="anisotropic" value="0.8"/>
-			<float name="eta" value="1.5"/>
+			<float name="eta2" value="1.33"/>
+			<float name="eta3" value="1.9"/>
+			<float name="d" value="0.550"/>
+			<float name="kappa3" value="1.5"/>
 		</bsdf>
 	</shape>
 
@@ -30,7 +33,7 @@
 		</transform>
 
 		<sampler type="independent">
-			<integer name="sampleCount" value="256"/>
+			<integer name="sampleCount" value="1024"/>
 		</sampler>
 
 		<film type="hdrfilm" id="film">

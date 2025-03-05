@@ -116,6 +116,38 @@ inline TVector2<T> operator/(const TVector2<T> &v, const T &s) {
 }
 
 template <typename T>
+inline TVector2<T> operator*(const TVector2<T> &v0, const TVector2<T> &v1) {
+    return TVector2<T>(v0[0] * v1[0], v0[1] * v1[1]);
+}
+
+template <typename T>
+inline TVector2<T> sqrt(const TVector2<T> &v) {
+    return TVector2<T>{
+        sqrt(max(v[0], Real(0))),
+        sqrt(max(v[1], Real(0)))};
+}
+
+template <typename T>
+inline TVector2<T> operator/(const TVector2<T> &v0, const TVector2<T> &v1) {
+    return TVector2<T>(v0[0] / v1[0], v0[1] / v1[1]);
+}
+
+template <typename T>
+inline TVector2<T>& operator*=(TVector2<T> &v0, const TVector2<T> &v1) {
+    v0[0] *= v1[0];
+    v0[1] *= v1[1];
+    return v0;
+}
+
+template <typename T>
+inline TVector3<T> cos(const TVector3<T> &v) {
+    return TVector3<T>(
+        cos(v[0]),
+        cos(v[1]),
+        cos(v[2]));
+}
+
+template <typename T>
 inline TVector3<T> operator+(const TVector3<T> &v0, const TVector3<T> &v1) {
     return TVector3<T>(v0.x + v1.x, v0.y + v1.y, v0.z + v1.z);
 }

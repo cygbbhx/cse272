@@ -84,7 +84,10 @@ struct Iridescent {
     Texture<Real> roughness;
     Texture<Real> anisotropic;
 
-    Real eta;
+    Real eta2;
+    Real eta3;
+    Real d;
+    Real kappa3;
 };
 
 /// For homework 1: the whole Disney BRDF.

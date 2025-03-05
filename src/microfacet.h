@@ -115,6 +115,11 @@ inline Real smith_masking_gtr2(const Vector3 &v_local, Real roughness) {
     return 1 / (1 + Lambda);
 }
 
+inline Real smith_masking_gtr2(const Vector3 &v_local, Real alpha_x, Real alpha_y) {
+    Real lambda = (sqrt(1 + ((v_local.x*alpha_x * v_local.x*alpha_x) + (v_local.y*alpha_y*v_local.y*alpha_y)) / (v_local.z * v_local.z)) - 1) / 2;
+    return 1 / (1 + lambda);
+}
+
 /// See "Sampling the GGX Distribution of Visible Normals", Heitz, 2018.
 /// https://jcgt.org/published/0007/04/01/
 inline Vector3 sample_visible_normals(const Vector3 &local_dir_in, Real alpha, const Vector2 &rnd_param) {
@@ -177,4 +182,88 @@ inline Vector3 sample_visible_normals(const Vector3 &local_dir_in, Real alpha_x,
 
     // Transforming the normal back to the ellipsoid configuration
     return normalize(Vector3{alpha_x * hemi_N.x, alpha_y * hemi_N.y, max(Real(0), hemi_N.z)});
+}
+
+inline Real sqr(Real x) { return x * x; }
+inline Vector2 sqr(Vector2 v) { return Vector2(v.x * v.x, v.y * v.y); }
+inline Real depol(Vector2 polV){ return 0.5 * (polV.x + polV.y); }
+inline Spectrum depolColor(Spectrum colS, Spectrum colP){ return 0.5 * (colS + colP); }
+
+inline Real smithG1_GGX(Real NdotV, Real alpha) {
+    Real a2 = sqr(alpha);
+    return 2.0 / (1.0 + sqrt(1.0 + a2 * (1.0 - sqr(NdotV)) / sqr(NdotV)));
+}
+
+inline Real smithG_GGX(Real NdotV, Real NdotL, Real alpha) {
+    return smithG1_GGX(NdotV, alpha) * smithG1_GGX(NdotL, alpha);
+}
+
+inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta1, Real eta2) {
+    Real eta = eta1 / eta2;
+    Real cos1 = n_dot_i;
+    Real sin1 = (1 - cos1 * cos1);
+    Real n_dot_t_sq = 1 - (1 - n_dot_i * n_dot_i) / (eta * eta);
+    Vector2 R; Vector2 phi;
+
+    if (n_dot_t_sq < 0) {
+        // total internal reflection
+        R = Vector2(1.0, 1.0);
+        Real sqrt_term = max(sqrt(sin1 - 1.0 / (eta * eta)), Real(0)); // Is this needed?
+        Vector2 var = Vector2f(- eta * eta * sqrt_term / cos1, -sqrt_term / cos1);
+        phi = Vector2(2 * atan(var.x), 2 * atan(var.y));
+        return {R, phi};
+    }
+    else {
+        Real cos2 = sqrt(1 - (eta * eta) * sin1);
+        Vector2 r = Vector2(
+            (eta2 * cos1 - eta1 * cos2) / (eta2 * cos1 + eta1 * cos2),
+            (eta1 * cos1 - eta2 * cos2) / (eta1 * cos1 + eta2 * cos2)
+        );
+
+        phi = Vector2(
+            r.x < 0 ? c_PI : 0,
+            r.y < 0 ? c_PI : 0
+        );
+
+        R = Vector2(r.x * r.x, r.y * r.y);
+        return {R, phi};
+    }
+}
+
+inline std::pair<Vector2, Vector2> F_conductor(Real n_dot_i, Real eta1, Real eta2, Real k) {
+    if (k == 0) {
+        return F_dielectric(n_dot_i, eta1, eta2);
+    }
+
+    Real cos1 = n_dot_i;
+
+    Real A = sqr(eta2) * (1.0 - sqr(k)) - sqr(eta1) * (1.0 - sqr(cos1));
+    Real B = sqrt(sqr(A) + sqr(2.0 * sqr(eta2) * k));
+    Real U = sqrt((A + B) / 2.0);
+    Real V = sqrt((B - A) / 2.0);
+
+    Vector2 R;
+    Vector2 phi;
+
+    R.y = (sqr(eta1 * cos1 - U) + sqr(V)) / (sqr(eta1 * cos1 + U) + sqr(V));
+
+    Vector2 var1 = Vector2(2.0 * eta1 * V * cos1, sqr(U) + sqr(V) - sqr(eta1 * cos1));
+    phi.y = atan2(var1.x, var1.y) + c_PI;
+
+    R.x = (sqr(sqr(eta2)*(1-sqr(k))*cos1 - eta1*U) + sqr(2*sqr(eta2)*k*cos1 - eta1*V)) / (sqr(sqr(eta2)*(1-sqr(k))*cos1 + eta1*U) + sqr(2*sqr(eta2)*k*cos1 + eta1*V));
+
+    Vector2 var2 = Vector2(2*eta1*sqr(eta2)*cos1 * (2*k*U - (1-sqr(k))*V), sqr(sqr(eta2)*(1+sqr(k))*cos1) - sqr(eta1)*(sqr(U)+sqr(V))) ;
+    phi.x = atan2(var2.x, var2.y);
+
+    return {R, phi};
+}
+
+inline Spectrum eval_sensitivity(Real opd, Real shift) {
+    Real phase = 2.0 * c_PI * opd * 1e-6;
+    Spectrum val = Spectrum(5.4856e-13, 4.4201e-13, 5.2481e-13);
+    Spectrum pos = Spectrum(1.6810e+06, 1.7953e+06, 2.2084e+06);
+    Spectrum var = Spectrum(4.3278e+09, 9.3046e+09, 6.6121e+09);
+    Spectrum xyz = val * sqrt(2.0 * c_PI * var) * cos(pos * phase + shift) * exp(-var * phase * phase);
+    xyz.x += 9.7470e-14 * sqrt(2.0 * c_PI * 4.5282e+09) * cos(2.2399e+06 * phase + shift) * exp(-4.5282e+09 * phase * phase);
+    return xyz / 1.0685e-7;
 }
