@@ -90,27 +90,12 @@ std::optional<BSDFSampleRecord>
     Vector3 local_micro_normal =
         sample_visible_normals(local_dir_in, alpha_x, alpha_y, rnd_param_uv);
     Vector3 half_vector = to_world(frame, local_micro_normal);
-    Vector3 h_l = to_local(frame, half_vector);
-    Vector3 w_l_in = to_local(frame, dir_in);
 
-    Real D_m = D_metal(h_l, roughness, anisotropic);
-    Real G_in = G_metal(w_l_in, roughness, anisotropic);
-
-    Real prob = D_m * G_in / (4.0 * fabs(dot(frame.n, dir_in)));
-
-    if (rnd_param_w < prob) {
-        // Sample from the specular lobe.
-        Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-        return BSDFSampleRecord{
-            reflected,
-            Real(0) /* eta */, roughness /* roughness */
+    Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
+    return BSDFSampleRecord{
+        reflected,
+        Real(0) /* eta */, roughness /* roughness */
         };
-    } else {
-        // Lambertian sampling
-        return BSDFSampleRecord{
-            to_world(frame, sample_cos_hemisphere(rnd_param_uv)),
-            Real(0) /* eta */, Real(1) /* roughness */};
-    }
 }
 
 TextureSpectrum get_texture_op::operator()(const DisneyMetal &bsdf) const {
