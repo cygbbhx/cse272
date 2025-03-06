@@ -70,6 +70,12 @@ inline Real GGX(Real n_dot_h, Real roughness) {
     return GTR2(n_dot_h, roughness);
 }
 
+inline Real GGX2(Real n_dot_h, Real alpha) {
+    Real a2 = alpha * alpha;
+    Real t = 1 + (a2 - 1) * n_dot_h * n_dot_h;
+    return a2 / (c_PI * t*t + 1e-7);
+}
+
 inline std::pair<Real, Real> compute_alpha(Real roughness, Real anisotropic) {
     Real aspect = sqrt(1 - anisotropic * 0.9);
     Real alpha_min = 0.0001;

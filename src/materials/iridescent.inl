@@ -51,7 +51,7 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     std::tie(R23, phi23) = F_conductor(cos_theta_2, eta2, eta3, kappa3);
 
     // phase shift
-    Real OPD = d * cos_theta_2;
+    Real OPD = 2 * eta2 * d * cos_theta_2; // Or D_inc * cos_theta_2 (D_inc = 2 * eta2 * d)
     Vector2 phi2 = phi21 + phi23;
 
     // Compound terms
@@ -76,9 +76,12 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
 
     I = saturate(XYZ_to_RGB(I));
 
-    Real D = GGX(dot(frame.n, half_vector), alpha);
-    Real G = smithG_GGX(n_dot_l, n_dot_v, alpha);
-    Spectrum f = (D * G * I) / (4.0 * n_dot_l * n_dot_v);
+    Real D = GTR2(dot(frame.n, half_vector), roughness);
+    Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
+    Real G_out = smith_masking_gtr2(to_local(frame, dir_out), alpha);
+    Real G = G_in * G_out;
+
+    Spectrum f = (D * G * I) / (4.0 * fabs(n_dot_l));
     return f;
 }
 
@@ -105,9 +108,10 @@ Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
         bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
     Real alpha = roughness * roughness;
 
-    Real D = GGX(dot(frame.n, half_vector), alpha);
+    Real D = GTR2(n_dot_h, roughness);
+    Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
 
-    return (D * n_dot_h) / (4 * h_dot_out);
+    return (D * G_in) / (4 * dot(dir_in, frame.n));
 }
 
 std::optional<BSDFSampleRecord>
@@ -123,28 +127,21 @@ std::optional<BSDFSampleRecord>
     }
     
     Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-    Real alpha = roughness * roughness;
+    roughness = std::clamp(roughness, Real(0.01), Real(1));
     
-    // Appendix B.2 Burley's note
-    Real alpha2 = alpha * alpha;
-    // Equation 5
-    Real cos_h_elevation =
-        sqrt(max(Real(0), (1 - pow(alpha2, 1 - rnd_param_uv[0])) / (1 - alpha2)));
-    Real sin_h_elevation = sqrt(max(1 - cos_h_elevation * cos_h_elevation, Real(0)));
-    Real h_azimuth = 2 * c_PI * rnd_param_uv[1];
-    Vector3 local_micro_normal{
-        sin_h_elevation * cos(h_azimuth),
-        sin_h_elevation * sin(h_azimuth),
-        cos_h_elevation
-    };
-    // Transform the micro normal to world space
-    Vector3 half_vector = to_world(frame, local_micro_normal);
+    Vector3 local_dir_in = to_local(vertex.shading_frame, dir_in);
+    constexpr Real min_alpha = Real(0.0001);
+    Real alpha = max(roughness * roughness, min_alpha);
 
+    Vector3 local_micro_normal =
+        sample_visible_normals(local_dir_in, alpha, rnd_param_uv);
+
+    // Transform the micro normal to world space
+    Vector3 half_vector = to_world(vertex.shading_frame, local_micro_normal);
     // Reflect over the world space normal
     Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
     return BSDFSampleRecord{
-        reflected, Real(0) /* eta */, roughness
-    };
+        reflected, Real(0) /* eta */, roughness /* roughness */};
 }
 
 TextureSpectrum get_texture_op::operator()(const Iridescent &bsdf) const {
