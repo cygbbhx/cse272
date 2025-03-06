@@ -185,8 +185,15 @@ inline Vector3 sample_visible_normals(const Vector3 &local_dir_in, Real alpha_x,
 }
 
 inline Real sqr(Real x) { return x * x; }
+
 inline Vector2 sqr(Vector2 v) { return Vector2(v.x * v.x, v.y * v.y); }
+
+inline Real saturate(Real x) { return std::clamp(x, Real(0), Real(1)); }
+
+inline Spectrum saturate(Spectrum v) { return Spectrum(saturate(v[0]), saturate(v[1]), saturate(v[2])); }
+
 inline Real depol(Vector2 polV){ return 0.5 * (polV.x + polV.y); }
+
 inline Spectrum depolColor(Spectrum colS, Spectrum colP){ return 0.5 * (colS + colP); }
 
 inline Real smithG1_GGX(Real NdotV, Real alpha) {
@@ -202,15 +209,15 @@ inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta1, Real et
     Real eta = eta1 / eta2;
     Real cos1 = n_dot_i;
     Real sin1 = (1 - cos1 * cos1);
-    Real n_dot_t_sq = 1 - (1 - n_dot_i * n_dot_i) / (eta * eta);
     Vector2 R; Vector2 phi;
 
-    if (n_dot_t_sq < 0) {
+    if (sqr(eta) * sin1 > 1) {
         // total internal reflection
         R = Vector2(1.0, 1.0);
-        Real sqrt_term = max(sqrt(sin1 - 1.0 / (eta * eta)), Real(0)); // Is this needed?
+        Real sqrt_term = sqrt(sin1 - 1.0 / (eta * eta));
         Vector2 var = Vector2f(- eta * eta * sqrt_term / cos1, -sqrt_term / cos1);
         phi = Vector2(2 * atan(var.x), 2 * atan(var.y));
+        assert(!isnan(phi.x) && !isnan(phi.y));
         return {R, phi};
     }
     else {

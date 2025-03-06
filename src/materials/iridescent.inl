@@ -7,17 +7,20 @@
 #include "../microfacet.h"
 
 Spectrum eval_op::operator()(const Iridescent &bsdf) const {
-    bool reflect = dot(vertex.geometric_normal, dir_in) *
-                   dot(vertex.geometric_normal, dir_out) > 0;
-    
+    if (dot(vertex.geometric_normal, dir_in) < 0 ||
+            dot(vertex.geometric_normal, dir_out) < 0) {
+        // No light below the surface
+        return make_zero_spectrum();
+    }
     Frame frame = vertex.shading_frame;
     if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
         frame = -frame;
     }
     Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);    
+    Real alpha = roughness * roughness;
 
     Real d = bsdf.d;
-    Real eta2 = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+    Real eta2 = bsdf.eta2;
     Real eta3 = bsdf.eta3;
     Real kappa3 = bsdf.kappa3;
 
@@ -29,18 +32,7 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     }
 
     Vector3 half_vector;
-    if (reflect) {
-        half_vector = normalize(dir_in + dir_out);
-    } else {
-        // "Generalized half-vector" from Walter et al.
-        // See "Microfacet Models for Refraction through Rough Surfaces"
-        half_vector = normalize(dir_in + dir_out * eta2);
-    }
-
-    // Flip half-vector if it's below surface
-    if (dot(half_vector, frame.n) < 0) {
-        half_vector = -half_vector;
-    }
+    half_vector = normalize(dir_in + dir_out);
 
     // TODO: Force eta2 -> 1 when d -> 0
     
@@ -82,130 +74,77 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
         I += depolColor(Cm.x * SmS, Cm.y * SmP);
     }
 
-    I = XYZ_to_RGB(I);
+    I = saturate(XYZ_to_RGB(I));
 
-    Real D = GGX(cos_theta_1, roughness);
-    Real G = smithG_GGX(n_dot_l, n_dot_v, roughness);
+    Real D = GGX(dot(frame.n, half_vector), alpha);
+    Real G = smithG_GGX(n_dot_l, n_dot_v, alpha);
     Spectrum f = (D * G * I) / (4.0 * n_dot_l * n_dot_v);
     return f;
 }
 
 Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
-    bool reflect = dot(vertex.geometric_normal, dir_in) *
-                   dot(vertex.geometric_normal, dir_out) > 0;
-    // Flip the shading frame if it is inconsistent with the geometry normal
+    if (dot(vertex.geometric_normal, dir_in) < 0 ||
+    dot(vertex.geometric_normal, dir_out) < 0) {
+        // No light below the surface
+        return 0;
+    }
     Frame frame = vertex.shading_frame;
-    if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
+    if (dot(frame.n, dir_in) < 0) {
         frame = -frame;
     }
-    // Homework 1: implement this!
-    // If we are going into the surface, then we use normal eta
-    // (internal/external), otherwise we use external/internal.
-    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
-    assert(eta > 0);
 
-    Vector3 half_vector;
-    if (reflect) {
-        half_vector = normalize(dir_in + dir_out);
-    } else {
-        // "Generalized half-vector" from Walter et al.
-        // See "Microfacet Models for Refraction through Rough Surfaces"
-        half_vector = normalize(dir_in + dir_out * eta);
-    }
-
-    // Flip half-vector if it's below surface
-    if (dot(half_vector, frame.n) < 0) {
-        half_vector = -half_vector;
+    Vector3 half_vector = normalize(dir_in + dir_out);
+    Real n_dot_out = dot(frame.n, dir_out);
+    Real n_dot_h = dot(frame.n, half_vector);
+    Real h_dot_out = dot(half_vector, dir_out);
+    if (n_dot_out <= 0 || n_dot_h <= 0 || h_dot_out <= 0) {
+        return 0;
     }
 
     Real roughness = eval(
         bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-    // Clamp roughness to avoid numerical issues.
-    roughness = std::clamp(roughness, Real(0.01), Real(1));
+    Real alpha = roughness * roughness;
 
-    Real h_dot_in = dot(half_vector, dir_in);
-    Real F = fresnel_dielectric(h_dot_in, eta);
+    Real D = GGX(dot(frame.n, half_vector), alpha);
 
-    Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
-
-    Vector3 h_l = to_local(frame, half_vector);
-    Vector3 w_l_in = to_local(frame, dir_in);
-
-    // Real D = D_metal(h_l, roughness, anisotropic);
-    // Real G_in = G_metal(w_l_in, roughness, anisotropic);
-
-    Real cos_theta_1 = dot(half_vector, dir_in);
-
-    Real D = GGX(cos_theta_1, roughness);
-    Real n_dot_l = dot(frame.n, dir_in);
-    Real n_dot_v = dot(frame.n, dir_out);
-    
-    Real G_in = smithG1_GGX(n_dot_l, roughness);
-    Real G = smithG_GGX(n_dot_l, n_dot_v, roughness);
-    
-
-    if (reflect) {
-        return (F * D * G_in) / (4 * fabs(dot(frame.n, dir_in)));
-    } else {
-        Real h_dot_out = dot(half_vector, dir_out);
-        Real sqrt_denom = h_dot_in + eta * h_dot_out;
-        Real dh_dout = eta * eta * h_dot_out / (sqrt_denom * sqrt_denom);
-        return (1 - F) * D * G_in * fabs(dh_dout * h_dot_in / dot(frame.n, dir_in));
-    }
+    return (D * n_dot_h) / (4 * h_dot_out);
 }
 
 std::optional<BSDFSampleRecord>
         sample_bsdf_op::operator()(const Iridescent &bsdf) const {
+    if (dot(vertex.geometric_normal, dir_in) < 0) {
+        // No light below the surface
+        return {};
+    }
     // Flip the shading frame if it is inconsistent with the geometry normal
-    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
     Frame frame = vertex.shading_frame;
-    if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
+    if (dot(frame.n, dir_in) < 0) {
         frame = -frame;
     }
     
-    Real roughness = eval(
-        bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-
-    Real anisotropic = eval(bsdf.anisotropic, vertex.uv, vertex.uv_screen_size, texture_pool);
-    auto [alpha_x, alpha_y] = compute_alpha(roughness, anisotropic);
+    Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
+    Real alpha = roughness * roughness;
     
-    Vector3 local_dir_in = to_local(frame, dir_in);
-    Vector3 local_micro_normal =
-        sample_visible_normals(local_dir_in, alpha_x, alpha_y, rnd_param_uv);
-
+    // Appendix B.2 Burley's note
+    Real alpha2 = alpha * alpha;
+    // Equation 5
+    Real cos_h_elevation =
+        sqrt(max(Real(0), (1 - pow(alpha2, 1 - rnd_param_uv[0])) / (1 - alpha2)));
+    Real sin_h_elevation = sqrt(max(1 - cos_h_elevation * cos_h_elevation, Real(0)));
+    Real h_azimuth = 2 * c_PI * rnd_param_uv[1];
+    Vector3 local_micro_normal{
+        sin_h_elevation * cos(h_azimuth),
+        sin_h_elevation * sin(h_azimuth),
+        cos_h_elevation
+    };
+    // Transform the micro normal to world space
     Vector3 half_vector = to_world(frame, local_micro_normal);
-    // Flip half-vector if it's below surface
-    if (dot(half_vector, frame.n) < 0) {
-        half_vector = -half_vector;
-    }
-    // Now we need to decide whether to reflect or refract.
-    // We do this using the Fresnel term.
-    Real h_dot_in = dot(half_vector, dir_in);
-    Real F = fresnel_dielectric(h_dot_in, eta);
 
-    if (rnd_param_w <= F) {
-        Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-        // set eta to 0 since we are not transmitting
-        return BSDFSampleRecord{reflected, Real(0) /* eta */, roughness};
-        // Reflection
-    } else {
-        // Refraction
-        // https://en.wikipedia.org/wiki/Snell%27s_law#Vector_form
-        // (note that our eta is eta2 / eta1, and l = -dir_in)
-        Real h_dot_out_sq = 1 - (1 - h_dot_in * h_dot_in) / (eta * eta);
-        if (h_dot_out_sq <= 0) {
-            // Total internal reflection
-            // This shouldn't really happen, as F will be 1 in this case.
-            return {};
-        }
-        // flip half_vector if needed
-        if (h_dot_in < 0) {
-            half_vector = -half_vector;
-        }
-        Real h_dot_out= sqrt(h_dot_out_sq);
-        Vector3 refracted = -dir_in / eta + (fabs(h_dot_in) / eta - h_dot_out) * half_vector;
-        return BSDFSampleRecord{refracted, eta, roughness};
-    }
+    // Reflect over the world space normal
+    Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
+    return BSDFSampleRecord{
+        reflected, Real(0) /* eta */, roughness
+    };
 }
 
 TextureSpectrum get_texture_op::operator()(const Iridescent &bsdf) const {
