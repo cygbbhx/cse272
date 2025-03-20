@@ -1055,6 +1055,7 @@ std::tuple<std::string /* ID */, Material> parse_bsdf(
         Real eta3 = Real(1.5);
         Real d = Real(0.0);
         Real kappa3 = Real(0.0);
+        bool isConductorBase = true;
 
         for (auto child : node.children()) {
             std::string name = child.attribute("name").value();
@@ -1075,9 +1076,11 @@ std::tuple<std::string /* ID */, Material> parse_bsdf(
                 d = parse_float(child.attribute("value").value(), default_map);
             } else if (name == "kappa3") {
                 kappa3 = parse_float(child.attribute("value").value(), default_map);
+            } else if (name == "isConductorBase") {
+                isConductorBase = parse_boolean(child.attribute("value").value(), default_map);
             }
         }
-        return std::make_tuple(id, Iridescent{base_color, roughness, anisotropic, eta2, eta3, d, kappa3});    
+        return std::make_tuple(id, Iridescent{base_color, roughness, anisotropic, eta2, eta3, d, kappa3, isConductorBase});    
     }
     else if (type == "disneyglass") {
         Texture<Spectrum> base_color = make_constant_spectrum_texture(fromRGB(Vector3{0.5, 0.5, 0.5}));

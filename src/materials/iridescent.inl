@@ -9,13 +9,12 @@
 Spectrum fresnel_iridescent(
     const Real &cos_theta_1,
     const Real &eta,
-    const Iridescent &bsdf
+    const Real &d,
+    const Real &eta2,
+    const Real &eta3,
+    const Real &kappa3,
+    const bool &isConductorBase
 ) {
-    Real d      = bsdf.d;
-    Real eta2   = bsdf.eta2;
-    Real eta3   = bsdf.eta3;
-    Real kappa3 = bsdf.kappa3;
-
     // First interface
     Vector2 R12; Vector2 phi12;
     std::tie(R12, phi12) = F_dielectric(cos_theta_1, 1.0 / eta); 
@@ -27,13 +26,17 @@ Spectrum fresnel_iridescent(
     // Second interface
     Real cos_theta_2_sqr = 1.0 - sqr(1.0 / eta) * (1.0 - sqr(cos_theta_1));
     Vector2 R23; Vector2 phi23;
-    // std::tie(R23, phi23) = F_conductor(cos_theta_2, eta2, eta3, kappa3);
-
+    
     if (cos_theta_2_sqr < 0) {
         return make_const_spectrum(1.0);
     }
     Real cos_theta_2 = sqrt(cos_theta_2_sqr);
-    std::tie(R23, phi23) = F_dielectric(cos_theta_2, eta);
+
+    if (isConductorBase) {
+        std::tie(R23, phi23) = F_conductor(cos_theta_2, eta2, eta3, kappa3);
+    } else {
+        std::tie(R23, phi23) = F_dielectric(cos_theta_2, eta);
+    }
 
     // phase shift
     Real OPD = 2 * eta2 * d * cos_theta_2; // Or D_inc * cos_theta_2 (D_inc = 2 * eta2 * d)
@@ -73,7 +76,13 @@ Spectrum fresnel_iridescent(
 Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     bool reflect = dot(vertex.geometric_normal, dir_in) *
                    dot(vertex.geometric_normal, dir_out) > 0;
-    bool isDielectricBase = bsdf.kappa3 != 0;
+    bool isConductorBase = bsdf.isConductorBase;
+
+    if (isConductorBase && (dot(vertex.geometric_normal, dir_in) < 0 ||
+                            dot(vertex.geometric_normal, dir_out) < 0)) {
+        // No light below the surface
+        return make_zero_spectrum();
+    }
 
     Frame frame = vertex.shading_frame;
     if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
@@ -86,26 +95,31 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     Real n_dot_l = dot(frame.n, dir_in);
     Real n_dot_v = dot(frame.n, dir_out);
 
-    Vector3 half_vector = normalize(dir_in + dir_out);
-    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
-
-    if (!reflect) {
-        half_vector = normalize(dir_in + dir_out * eta);
+    if (isConductorBase && (n_dot_l < 0 || n_dot_v < 0)) {
+        return make_zero_spectrum();
     }
 
-    if (dot(half_vector, frame.n) < 0) {
-        half_vector = -half_vector;
+    Vector3 half_vector = normalize(dir_in + dir_out);
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 || isConductorBase ? bsdf.eta2 : 1 / bsdf.eta2;
+    
+    if (!isConductorBase) {
+        if (!reflect) {
+            half_vector = normalize(dir_in + dir_out * eta);
+        }
+        if (dot(half_vector, frame.n) < 0) {
+            half_vector = -half_vector;
+        }
     }
 
     Real h_dot_in = dot(half_vector, dir_in);
-    Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
+    Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf.d, bsdf.eta2, bsdf.eta3, bsdf.kappa3, isConductorBase);
 
     Real D = GTR2(dot(frame.n, half_vector), roughness);
     Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
     Real G_out = smith_masking_gtr2(to_local(frame, dir_out), alpha);
     Real G = G_in * G_out;
-
-    if (reflect) {
+    
+    if (reflect || isConductorBase) {
         return I * D * G / (4 * fabs(dot(frame.n, dir_in)));
     } else {
         Real eta_factor = dir == TransportDirection::TO_LIGHT ? (1 / (eta * eta)) : 1;
@@ -119,42 +133,53 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
 Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
     bool reflect = dot(vertex.geometric_normal, dir_in) *
                    dot(vertex.geometric_normal, dir_out) > 0;
-    
+    bool isConductorBase = bsdf.isConductorBase;
+
+    if (isConductorBase && (dot(vertex.geometric_normal, dir_in) < 0 ||
+                            dot(vertex.geometric_normal, dir_out) < 0)) {
+        // No light below the surface
+        return 0;
+    }
+
     Frame frame = vertex.shading_frame;
     if (dot(frame.n, dir_in) < 0) {
         frame = -frame;
     }
 
-    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 || isConductorBase ? bsdf.eta2 : 1 / bsdf.eta2;
 
     Vector3 half_vector = normalize(dir_in + dir_out);
-    Real cos_theta_1 = dot(half_vector, dir_in);
-    if (!reflect) {
-        half_vector = normalize(dir_in + dir_out * eta);
-    }
 
-    if (dot(half_vector, frame.n) < 0) {
-        half_vector = -half_vector;
+    if (isConductorBase) {
+        Real n_dot_out = dot(frame.n, dir_out);
+        Real n_dot_h = dot(frame.n, half_vector);
+        Real h_dot_out = dot(half_vector, dir_out);
+        if (n_dot_out <= 0 || n_dot_h <= 0 || h_dot_out <= 0) {
+            return 0;
+        }
+    } else {        
+        if (!reflect) {
+            half_vector = normalize(dir_in + dir_out * eta);
+        }
+        if (dot(half_vector, frame.n) < 0) {
+            half_vector = -half_vector;
+        }
     }
-
-    Real n_dot_out = dot(frame.n, dir_out);
     Real n_dot_h = dot(frame.n, half_vector);
-    Real h_dot_out = dot(half_vector, dir_out);
 
     Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);    
     roughness = std::clamp(roughness, Real(0.01), Real(1));
     Real alpha = roughness * roughness;
 
-    Real n_dot_in = dot(frame.n, dir_in);
     Real h_dot_in = dot(half_vector, dir_in);
     
     Real D = GTR2(n_dot_h, roughness);
     Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
     // Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
     // Real F = avg(I);
-    Real F = fresnel_dielectric(h_dot_in, eta);
+    Real F = isConductorBase ? Real(1.0) : fresnel_dielectric(h_dot_in, eta);
 
-    if (reflect) {
+    if (reflect || isConductorBase) {
         return (F * D * G_in) / (4 * fabs(dot(frame.n, dir_in)));
     } else {
         Real h_dot_out = dot(half_vector, dir_out);
@@ -166,7 +191,14 @@ Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
 
 std::optional<BSDFSampleRecord>
         sample_bsdf_op::operator()(const Iridescent &bsdf) const {
-    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+    bool isConductorBase = bsdf.isConductorBase;
+
+    if (isConductorBase && (dot(vertex.geometric_normal, dir_in) < 0)) {
+        // No light below the surface
+        return {};
+    }
+
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 || isConductorBase ? bsdf.eta2 : 1 / bsdf.eta2;
 
     Frame frame = vertex.shading_frame;
     if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
@@ -181,7 +213,7 @@ std::optional<BSDFSampleRecord>
     Vector3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd_param_uv);
 
     Vector3 half_vector = to_world(frame, local_micro_normal);
-    if (dot(half_vector, frame.n) < 0) {
+    if (!isConductorBase && (dot(half_vector, frame.n) < 0)) {
         half_vector = -half_vector;
     }
     Real h_dot_in = dot(half_vector, dir_in);
@@ -189,8 +221,8 @@ std::optional<BSDFSampleRecord>
     // Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
     // Real F = avg(I);
     Real F = fresnel_dielectric(h_dot_in, eta);
-
-    if (rnd_param_w <= F) {
+    
+    if (rnd_param_w <= F || isConductorBase) {
         Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
         return BSDFSampleRecord{reflected, Real(0) /* eta */, roughness};
         // Reflection

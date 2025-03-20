@@ -88,6 +88,7 @@ struct Iridescent {
     Real eta3;
     Real d;
     Real kappa3;
+    bool isConductorBase;
 };
 
 /// For homework 1: the whole Disney BRDF.
