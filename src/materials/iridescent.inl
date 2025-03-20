@@ -6,47 +6,34 @@
 
 #include "../microfacet.h"
 
-Spectrum eval_op::operator()(const Iridescent &bsdf) const {
-    if (dot(vertex.geometric_normal, dir_in) < 0 ||
-            dot(vertex.geometric_normal, dir_out) < 0) {
-        // No light below the surface
-        return make_zero_spectrum();
-    }
-    Frame frame = vertex.shading_frame;
-    if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
-        frame = -frame;
-    }
-    Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);    
-    Real alpha = roughness * roughness;
-
-    Real d = bsdf.d;
-    Real eta2 = bsdf.eta2;
-    Real eta3 = bsdf.eta3;
+Spectrum fresnel_iridescent(
+    const Real &cos_theta_1,
+    const Real &eta,
+    const Iridescent &bsdf
+) {
+    Real d      = bsdf.d;
+    Real eta2   = bsdf.eta2;
+    Real eta3   = bsdf.eta3;
     Real kappa3 = bsdf.kappa3;
-
-    Real n_dot_l = dot(frame.n, dir_in);
-    Real n_dot_v = dot(frame.n, dir_out);
-
-    if (n_dot_l < 0 || n_dot_v < 0) {
-        return make_const_spectrum(0.0);
-    }
-
-    Vector3 half_vector;
-    half_vector = normalize(dir_in + dir_out);
-    
-    Real cos_theta_1 = dot(half_vector, dir_in);
-    Real cos_theta_2 = sqrt(1.0 - sqr(1.0 / eta2) * (1.0 - sqr(cos_theta_1)));
 
     // First interface
     Vector2 R12; Vector2 phi12;
-    std::tie(R12, phi12) = F_dielectric(cos_theta_1, 1.0, eta2);    
+    std::tie(R12, phi12) = F_dielectric(cos_theta_1, 1.0 / eta); 
+    
     Vector2 R21 = R12;
     Vector2 T121 = 1.0 - R12;
     Vector2 phi21 = c_PI - phi12;
 
     // Second interface
+    Real cos_theta_2_sqr = 1.0 - sqr(1.0 / eta) * (1.0 - sqr(cos_theta_1));
     Vector2 R23; Vector2 phi23;
-    std::tie(R23, phi23) = F_conductor(cos_theta_2, eta2, eta3, kappa3);
+    // std::tie(R23, phi23) = F_conductor(cos_theta_2, eta2, eta3, kappa3);
+
+    if (cos_theta_2_sqr < 0) {
+        return make_const_spectrum(1.0);
+    }
+    Real cos_theta_2 = sqrt(cos_theta_2_sqr);
+    std::tie(R23, phi23) = F_dielectric(cos_theta_2, eta);
 
     // phase shift
     Real OPD = 2 * eta2 * d * cos_theta_2; // Or D_inc * cos_theta_2 (D_inc = 2 * eta2 * d)
@@ -78,80 +65,148 @@ Spectrum eval_op::operator()(const Iridescent &bsdf) const {
     I[0] = r;
     I[1] = g;
     I[2] = b;
-    I = saturate(I);
-    // I = saturate(XYZ_to_RGB(I));
+
+    return saturate(I);
+}
+
+
+Spectrum eval_op::operator()(const Iridescent &bsdf) const {
+    bool reflect = dot(vertex.geometric_normal, dir_in) *
+                   dot(vertex.geometric_normal, dir_out) > 0;
+    bool isDielectricBase = bsdf.kappa3 != 0;
+
+    Frame frame = vertex.shading_frame;
+    if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
+        frame = -frame;
+    }
+    Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);    
+    roughness = std::clamp(roughness, Real(0.01), Real(1));
+    Real alpha = roughness * roughness;
+
+    Real n_dot_l = dot(frame.n, dir_in);
+    Real n_dot_v = dot(frame.n, dir_out);
+
+    Vector3 half_vector = normalize(dir_in + dir_out);
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+
+    if (!reflect) {
+        half_vector = normalize(dir_in + dir_out * eta);
+    }
+
+    if (dot(half_vector, frame.n) < 0) {
+        half_vector = -half_vector;
+    }
+
+    Real h_dot_in = dot(half_vector, dir_in);
+    Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
 
     Real D = GTR2(dot(frame.n, half_vector), roughness);
-    Real G = smithG_GGX(n_dot_l, n_dot_v, alpha);
+    Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
+    Real G_out = smith_masking_gtr2(to_local(frame, dir_out), alpha);
+    Real G = G_in * G_out;
 
-    Spectrum f = (D * G * I) / (4.0 * fabs(n_dot_l));
-    return f;
+    if (reflect) {
+        return I * D * G / (4 * fabs(dot(frame.n, dir_in)));
+    } else {
+        Real eta_factor = dir == TransportDirection::TO_LIGHT ? (1 / (eta * eta)) : 1;
+        Real h_dot_out = dot(half_vector, dir_out);
+        Real sqrt_denom = h_dot_in + eta * h_dot_out;
+        return (eta_factor * (1 - I) * D * G * eta * eta * fabs(h_dot_out * h_dot_in)) / 
+                (fabs(dot(frame.n, dir_in)) * sqrt_denom * sqrt_denom);
+    }
 }
 
 Real pdf_sample_bsdf_op::operator()(const Iridescent &bsdf) const {
-    if (dot(vertex.geometric_normal, dir_in) < 0 ||
-    dot(vertex.geometric_normal, dir_out) < 0) {
-        // No light below the surface
-        return 0;
-    }
+    bool reflect = dot(vertex.geometric_normal, dir_in) *
+                   dot(vertex.geometric_normal, dir_out) > 0;
+    
     Frame frame = vertex.shading_frame;
     if (dot(frame.n, dir_in) < 0) {
         frame = -frame;
     }
 
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+
     Vector3 half_vector = normalize(dir_in + dir_out);
+    Real cos_theta_1 = dot(half_vector, dir_in);
+    if (!reflect) {
+        half_vector = normalize(dir_in + dir_out * eta);
+    }
+
+    if (dot(half_vector, frame.n) < 0) {
+        half_vector = -half_vector;
+    }
+
     Real n_dot_out = dot(frame.n, dir_out);
     Real n_dot_h = dot(frame.n, half_vector);
     Real h_dot_out = dot(half_vector, dir_out);
-    if (n_dot_out <= 0 || n_dot_h <= 0 || h_dot_out <= 0) {
-        return 0;
-    }
 
-    Real roughness = eval(
-        bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
+    Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);    
+    roughness = std::clamp(roughness, Real(0.01), Real(1));
     Real alpha = roughness * roughness;
 
+    Real n_dot_in = dot(frame.n, dir_in);
+    Real h_dot_in = dot(half_vector, dir_in);
+    
     Real D = GTR2(n_dot_h, roughness);
+    Real G_in = smith_masking_gtr2(to_local(frame, dir_in), alpha);
+    // Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
+    // Real F = avg(I);
+    Real F = fresnel_dielectric(h_dot_in, eta);
 
-    return (D * n_dot_h) / (4 * h_dot_out);
+    if (reflect) {
+        return (F * D * G_in) / (4 * fabs(dot(frame.n, dir_in)));
+    } else {
+        Real h_dot_out = dot(half_vector, dir_out);
+        Real sqrt_denom = h_dot_in + eta * h_dot_out;
+        Real dh_dout = eta * eta * h_dot_out / (sqrt_denom * sqrt_denom);
+        return (1 - F) * D * G_in * fabs(dh_dout * h_dot_in / dot(frame.n, dir_in));
+    }
 }
 
 std::optional<BSDFSampleRecord>
         sample_bsdf_op::operator()(const Iridescent &bsdf) const {
-    if (dot(vertex.geometric_normal, dir_in) < 0) {
-        // No light below the surface
-        return {};
-    }
-    // Flip the shading frame if it is inconsistent with the geometry normal
+    Real eta = dot(vertex.geometric_normal, dir_in) > 0 ? bsdf.eta2 : 1 / bsdf.eta2;
+
     Frame frame = vertex.shading_frame;
-    if (dot(frame.n, dir_in) < 0) {
+    if (dot(frame.n, dir_in) * dot(vertex.geometric_normal, dir_in) < 0) {
         frame = -frame;
     }
     
     Real roughness = eval(bsdf.roughness, vertex.uv, vertex.uv_screen_size, texture_pool);
-    roughness = std::clamp(roughness, Real(0.01), Real(1));
-    Real alpha = roughness * roughness;
-    
-    // Appendix B.2 Burley's note
-    Real alpha2 = alpha * alpha;
+    constexpr Real min_alpha = Real(0.0001);
+    Real alpha = max(roughness * roughness, min_alpha);
 
-    Real phi = 2 * c_PI * rnd_param_uv[0];
-    Real cos_theta = sqrt((1.0 - rnd_param_uv[1]) / (1.0 + (alpha2 - 1.0) * rnd_param_uv[1]));
-    Real sin_theta = sqrt(max(1e-5, 1.0 - cos_theta * cos_theta));
+    Vector3 local_dir_in = to_local(frame, dir_in);
+    Vector3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd_param_uv);
 
-    Vector3 local_micro_normal{
-        sin_theta * cos(phi),
-        sin_theta * sin(phi),
-        cos_theta
-    };
-    // Transform the micro normal to world space
     Vector3 half_vector = to_world(frame, local_micro_normal);
+    if (dot(half_vector, frame.n) < 0) {
+        half_vector = -half_vector;
+    }
+    Real h_dot_in = dot(half_vector, dir_in);
 
-    // Reflect over the world space normal
-    Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-    return BSDFSampleRecord{
-        reflected, Real(0) /* eta */, roughness
-    };
+    // Spectrum I = fresnel_iridescent(h_dot_in, eta, bsdf);
+    // Real F = avg(I);
+    Real F = fresnel_dielectric(h_dot_in, eta);
+
+    if (rnd_param_w <= F) {
+        Vector3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
+        return BSDFSampleRecord{reflected, Real(0) /* eta */, roughness};
+        // Reflection
+    } else {
+
+        Real h_dot_out_sq = 1 - (1 - h_dot_in * h_dot_in) / (eta * eta);
+        if (h_dot_out_sq <= 0) {
+            return {};
+        }
+        if (h_dot_in < 0) {
+            half_vector = -half_vector;
+        }
+        Real h_dot_out= sqrt(h_dot_out_sq);
+        Vector3 refracted = -dir_in / eta + (fabs(h_dot_in) / eta - h_dot_out) * half_vector;
+        return BSDFSampleRecord{refracted, eta, roughness};
+    }
 }
 
 TextureSpectrum get_texture_op::operator()(const Iridescent &bsdf) const {

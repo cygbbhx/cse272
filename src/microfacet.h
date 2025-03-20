@@ -211,8 +211,7 @@ inline Real smithG_GGX(Real NdotV, Real NdotL, Real alpha) {
     return smithG1_GGX(NdotV, alpha) * smithG1_GGX(NdotL, alpha);
 }
 
-inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta1, Real eta2) {
-    Real eta = eta1 / eta2;
+inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta) {
     Real cos1 = n_dot_i;
     Real sin1 = (1 - cos1 * cos1);
     Vector2 R; Vector2 phi;
@@ -227,10 +226,11 @@ inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta1, Real et
         return {R, phi};
     }
     else {
+        cos1 = fabs(cos1);
         Real cos2 = sqrt(1 - (eta * eta) * sin1);
         Vector2 r = Vector2(
-            (eta2 * cos1 - eta1 * cos2) / (eta2 * cos1 + eta1 * cos2),
-            (eta1 * cos1 - eta2 * cos2) / (eta1 * cos1 + eta2 * cos2)
+            (cos1 - eta * cos2) / (cos1 + eta * cos2),
+            (eta * cos1 - cos2) / (eta * cos1 + cos2)
         );
 
         phi = Vector2(
@@ -245,7 +245,7 @@ inline std::pair<Vector2, Vector2> F_dielectric(Real n_dot_i, Real eta1, Real et
 
 inline std::pair<Vector2, Vector2> F_conductor(Real n_dot_i, Real eta1, Real eta2, Real k) {
     if (k == 0) {
-        return F_dielectric(n_dot_i, eta1, eta2);
+        return F_dielectric(n_dot_i, eta1 / eta2);
     }
 
     Real cos1 = n_dot_i;
